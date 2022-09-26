@@ -44,48 +44,43 @@ void DHT11_init(gpio_num_t pin)
 }
 
 
-static dht_status_t dht_await_pin_state(gpio_num_t pin, uint32_t timeout,
-       int expected_pin_state, uint32_t *duration)
+static int dht_await_pin_state(uint32_t timeout,
+       int expected_pin_state)
 {
-    /* XXX dht_await_pin_state() should save pin direction and restore
-     * the direction before return. however, the SDK does not provide
-     * gpio_get_direction().
-     */
-    gpio_set_direction(pin, GPIO_MODE_INPUT);
-    for (uint32_t i = 0; i < timeout; i += DHT_TIMER_INTERVAL)
-    {
-        // need to wait at least a single interval to prevent reading a jitter
-        ets_delay_us(DHT_TIMER_INTERVAL);
-        if (gpio_get_level(pin) == expected_pin_state)
+    int micros_ticks = 0;
+    while(gpio_get_level(dht_gpio) == expected_pin_state) { 
+        if(micros_ticks++ > timeout) 
         {
-            if (duration)
-                *duration = i;
-            return DHT11_OK;
+            return DHT11_TIMEOUT_ERROR;
         }
+        ets_delay_us(1);
     }
+    return micros_ticks;
+}
 
-    return DHT11_TIMEOUT_ERROR;
+void Send_start_Signal()
+{
+    // Phase 'A' pulling signal low to initiate read sequence
+    //ESP32 set pin DATA as output and set it to 0 at leat 18ms
+    gpio_set_direction(dht_gpio, GPIO_MODE_OUTPUT_OD);
+    gpio_set_level(dht_gpio, 0);
+    ets_delay_us(20000);
+
+    //ESP32 pull up DATA pin and wait 20-40us
+    gpio_set_level(dht_gpio, 1);
+    gpio_set_direction(dht_gpio, GPIO_MODE_INPUT);
+    ets_delay_us(40);
 }
 
 static dht_status_t check_response()
 {
-    // Phase 'A' pulling signal low to initiate read sequence
-    gpio_set_direction(dht_gpio, GPIO_MODE_OUTPUT_OD);
-    gpio_set_level(dht_gpio, 0);
-    ets_delay_us(20000);
-    gpio_set_level(dht_gpio, 1);
-
-    if(dht_await_pin_state(dht_gpio, 40, 0, NULL) == DHT11_TIMEOUT_ERROR)
-    {
-        printf("Initialization error, problem in phase 'B' \n");
-    }
-
-    if(dht_await_pin_state(dht_gpio, 88, 1, NULL) == DHT11_TIMEOUT_ERROR)
+    // Data pin will in 0 level in 80us
+    if(dht_await_pin_state(80, 0) == DHT11_TIMEOUT_ERROR)
     {
         printf("Initialization error, problem in phase 'C' \n");
     }
-
-    if(dht_await_pin_state(dht_gpio,88, 0, NULL) == DHT11_TIMEOUT_ERROR)
+    // After that DHT pull up the DATA pin in 80us
+    if(dht_await_pin_state(80, 1) == DHT11_TIMEOUT_ERROR)
     {
         printf("Initialization error, problem in phase 'D' \n");
     }
@@ -95,30 +90,32 @@ static dht_status_t check_response()
 
 static dht_status_t get_data(uint8_t data[5])
 {
-    uint32_t low_duration;
-    uint32_t high_duration;
-
+    Send_start_Signal();
 
     check_response();
 
+    // Each bit is sent as a 50us low pulse followed by a variable length high pulse.
+    // If the high pulse is ~28us then it is a 0
+    // If it is ~70us then it is a 1
     /* Read 40 data bits */
     for(int i = 0; i < 40; i++) {
-        if(dht_await_pin_state(dht_gpio, 65, 1, &low_duration) == DHT11_TIMEOUT_ERROR)
+        if(dht_await_pin_state(50, 0) == DHT11_TIMEOUT_ERROR)
         {
-            printf("Low bit time out \n");
+            return DHT11_TIMEOUT_ERROR;
         }
 
-        if(dht_await_pin_state(dht_gpio, 75, 0, &high_duration) == DHT11_TIMEOUT_ERROR)
+        if(dht_await_pin_state(70, 1) > 28)
         {
-            printf("Hight bit time out' \n");
-        }
-
-        uint8_t b = i / 8;
-        uint8_t m = i % 8;
-        if (!m)
+            // bit was a 1
+            uint8_t b = i / 8;
+            uint8_t m = i % 8;
+            if (!m)
             data[b] = 0;
-
-        data[b] |= (high_duration > low_duration) << (7 - m);
+            data[b] |= (1) << (7 - m);;
+        }
+        else{
+            // No action for bit 0
+        }
     }
 
     return DHT11_OK;
@@ -130,9 +127,13 @@ dht11_reading_t read_value()
     gpio_set_direction(dht_gpio, GPIO_MODE_OUTPUT_OD);
     gpio_set_level(dht_gpio, 1);
 
-    dht_status_t result = get_data(data);
+    if (get_data(data) == DHT11_TIMEOUT_ERROR)
+    {
+        read_data.status = DHT11_GET_DATA_FAILED;
+        return read_data;
+    }
 
-    /* restore GPIO direction because, after calling dht_fetch_data(), the
+    /* restore GPIO direction because, after calling get_data(), the
      * GPIO direction mode changes */
     gpio_set_direction(dht_gpio, GPIO_MODE_OUTPUT_OD);
     gpio_set_level(dht_gpio, 1);

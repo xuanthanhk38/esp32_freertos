@@ -13,11 +13,12 @@
 typedef enum dht_status{
     DHT11_CRC_ERROR = -2,
     DHT11_TIMEOUT_ERROR,
-    DHT11_OK
+    DHT11_OK,
+    DHT11_GET_DATA_FAILED
 } dht_status_t;
 
 // dht timer precision in microseconds
-#define DHT_TIMER_INTERVAL 2
+#define DHT_TIMER_INTERVAL 1
 
 // a complete data transmission is 40 bit
 #define DHT_DATA_BITS 40
@@ -29,7 +30,7 @@ typedef enum dht_status{
 #define DHT_DATA_BYTES (DHT_DATA_BITS / 8)
 
 typedef struct dht11_reading {
-    int status;
+    dht_status_t status;
     int temperature;
     int humidity;
 } dht11_reading_t;
