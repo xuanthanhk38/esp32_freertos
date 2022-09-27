@@ -6,7 +6,7 @@ It seems to be a badly designed clone, the labels might be wrong (because it is 
 - Reproduce:
   + In example ultrasonic, use pin GND (next to 5V pin) to connect with GND of sensor
   
-- Message error: A fatal error occurred: Timed out waiting for packet content --> ESP32 Can not upload code
+- Message error: A fatal error occurred: Packet content transfer stopped (received 8 bytes) --> ESP32 Can not upload code
 
 - Solution: use other GND pins except for the GND pin next to the 5V pin
 
